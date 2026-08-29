@@ -1,0 +1,217 @@
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+
+    // --- 🔐 1. 在这里设置你的系统访问密码 ---
+    const SYSTEM_PASSWORD = "010203"; 
+
+    // 2. 查询 API：密码安全校验
+    if (url.pathname === '/api/prices' && request.method === 'GET') {
+      const pwd = url.searchParams.get('pwd');
+      if (pwd !== SYSTEM_PASSWORD) {
+        return Response.json({ success: false, message: '密码错误，无权获取数据！' });
+      }
+
+      const keyword = url.searchParams.get('keyword') || "";
+      const { results } = await env.frozen_goods_db.prepare(
+        "SELECT date, supplier, product_name, unit_price, unit FROM inbound_records WHERE product_name LIKE ? ORDER BY date DESC"
+      ).bind(`%${keyword}%`).all();
+      return Response.json({ success: true, data: results });
+    }
+
+    // 3. 网页界面
+    const html = `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>价格查询系统</title>
+    <style>
+        :root {
+            --primary: #4361ee;
+            --bg: #f4f7f6;
+            --card-bg: #ffffff;
+            --text-main: #2b2d42;
+            --text-sub: #8d99ae;
+            --border: #e9ecef;
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 15px;
+            background-color: var(--bg);
+            color: var(--text-main);
+        }
+        .container { max-width: 800px; margin: 0 auto; }
+        h2 { text-align: center; color: var(--primary); margin-top: 10px; margin-bottom: 20px; font-weight: 600; }
+        .card {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+            margin-bottom: 20px;
+        }
+        
+        #login-section {
+            max-width: 380px;
+            margin: 80px auto;
+            text-align: center;
+        }
+        .icon-lock { font-size: 40px; margin-bottom: 10px; }
+
+        .search-box { display: flex; gap: 10px; }
+        input[type="text"], input[type="password"] {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 16px;
+            outline: none;
+            transition: border-color 0.3s;
+            background-color: #f8f9fa;
+        }
+        input[type="text"]:focus, input[type="password"]:focus {
+            border-color: var(--primary);
+            background-color: #fff;
+        }
+        button {
+            padding: 12px 24px;
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+        }
+        button:hover { background-color: #3b5bdb; }
+        button:active { transform: scale(0.97); }
+        
+        .table-wrapper { overflow-x: auto; border-radius: 8px; border: 1px solid var(--border); }
+        table { width: 100%; border-collapse: collapse; min-width: 500px; font-size: 15px; }
+        th, td { padding: 14px 16px; text-align: left; border-bottom: 1px solid var(--border); }
+        th { background-color: #f8f9fa; color: var(--text-sub); font-weight: 600; white-space: nowrap; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background-color: #fcfcfc; }
+        .price { color: #e63946; font-weight: bold; font-family: monospace; font-size: 16px; }
+        .empty-state { text-align: center; padding: 30px; color: var(--text-sub); }
+
+        @media (max-width: 600px) {
+            body { padding: 10px; }
+            .card { padding: 15px; }
+            th, td { padding: 12px 10px; font-size: 14px; }
+            .price { font-size: 15px; }
+            #login-section { margin: 40px auto; }
+        }
+    </style>
+</head>
+<body>
+    
+    <div id="login-section" class="card">
+        <div class="icon-lock">🔒</div>
+        <h2 style="color: var(--text-main); margin-top:0;">内部系统访问</h2>
+        <p style="color: var(--text-sub); margin-bottom: 20px;">请输入访问密码以继续操作</p >
+        <input type="password" id="pwd-input" placeholder="请输入密码..." onkeypress="if(event.keyCode===13) login()">
+        <button onclick="login()" style="width: 100%; margin-top: 15px;">验证进入</button>
+        <p id="login-error" style="color: #e63946; display: none; margin-top: 15px; font-weight: 500;">❌ 密码错误，请重试！</p >
+    </div>
+
+    <div id="app-section" class="container" style="display: none;">
+        <h2>📊 数据查询系统</h2>
+        <div class="card">
+            <div class="search-box">
+                <input type="text" id="kw" placeholder="输入商品名称" onkeypress="if(event.keyCode===13) search()">
+                <button onclick="search()">查询</button>
+            </div>
+        </div>
+
+        <div class="card" style="padding: 0;">
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>入库日期</th>
+                            <th>供应商</th>
+                            <th>商品名称</th>
+                            <th>单价</th>
+                            <th>单位</th>
+                        </tr>
+                    </thead>
+                    <tbody id="res">
+                        <tr><td colspan="5" class="empty-state">请输入关键词后点击查询以显示数据</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    let sessionPwd = '';
+
+    async function login() {
+        const pwd = document.getElementById('pwd-input').value.trim();
+        if (!pwd) return;
+
+        try {
+            const res = await fetch('/api/prices?keyword=test&pwd=' + encodeURIComponent(pwd));
+            const json = await res.json();
+            
+            if (json.success) {
+                sessionPwd = pwd;
+                document.getElementById('login-section').style.display = 'none';
+                document.getElementById('app-section').style.display = 'block';
+                document.getElementById('login-error').style.display = 'none';
+            } else {
+                document.getElementById('login-error').style.display = 'block';
+            }
+        } catch (e) {
+            alert('网络错误，无法连接到服务器');
+        }
+    }
+
+    async function search() {
+        const keyword = document.getElementById('kw').value.trim();
+        const tbody = document.getElementById('res');
+        
+        if (!keyword) {
+            tbody.innerHTML = '<tr><td colspan="5" class="empty-state" style="color:#e63946;">⚠️ 请输入你要搜索的名称后再点击查询！</td></tr>';
+            return; 
+        }
+
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-state">数据加载中...</td></tr>';
+        
+        try {
+            const res = await fetch('/api/prices?keyword=' + encodeURIComponent(keyword) + '&pwd=' + encodeURIComponent(sessionPwd));
+            const json = await res.json();
+            
+            if (!json.success) {
+                tbody.innerHTML = '<tr><td colspan="5" class="empty-state" style="color:red;">' + json.message + '</td></tr>';
+                return;
+            }
+
+            if (json.data && json.data.length > 0) {
+                tbody.innerHTML = json.data.map(i => 
+                    '<tr>' +
+                        '<td style="color:#8d99ae;">' + i.date + '</td>' +
+                        '<td>' + i.supplier + '</td>' +
+                        '<td style="font-weight:500;">' + i.product_name + '</td>' +
+                        '<td class="price">¥' + i.unit_price + '</td>' +
+                        '<td style="color:#8d99ae;">' + (i.unit || '-') + '</td>' +
+                    '</tr>'
+                ).join('');
+            } else {
+                tbody.innerHTML = '<tr><td colspan="5" class="empty-state">没有找到与 “'+ keyword +'” 相关的记录</td></tr>';
+            }
+        } catch (e) {
+            tbody.innerHTML = '<tr><td colspan="5" class="empty-state" style="color:red;">查询出错，请稍后再试</td></tr>';
+        }
+    }
+    </script>
+</body>
+</html>`;
+    return new Response(html, { headers: { 'Content-Type': 'text/html;charset=UTF-8' } });
+  }
+};
